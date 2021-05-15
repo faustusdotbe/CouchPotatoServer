@@ -203,6 +203,8 @@ class YarrProvider(Provider):
         return {}
 
     def download(self, url = '', nzb_id = ''):
+        if re.match('^magnet:.*$', url):
+            return url
         try:
             return self.urlopen(url, headers = {'User-Agent': Env.getIdentifier()}, show_error = False)
         except:

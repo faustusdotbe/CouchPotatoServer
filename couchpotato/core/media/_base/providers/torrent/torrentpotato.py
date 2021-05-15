@@ -1,47 +1,40 @@
 from urlparse import urlparse
 import re
 import traceback
+import requests
 
 from couchpotato.core.helpers.encoding import toUnicode
 from couchpotato.core.helpers.variable import splitString, tryInt, tryFloat
 from couchpotato.core.logger import CPLog
 from couchpotato.core.media._base.providers.base import ResultList
 from couchpotato.core.media._base.providers.torrent.base import TorrentProvider
-
-
 log = CPLog(__name__)
-
-
 class Base(TorrentProvider):
-
     urls = {}
     limits_reached = {}
-
     http_time_between_calls = 1  # Seconds
-
     def search(self, media, quality):
         hosts = self.getHosts()
-
         results = ResultList(self, media, quality, imdb_results = True)
-
         for host in hosts:
             if self.isDisabled(host):
                 continue
-
             self._searchOnHost(host, media, quality, results)
-
         return results
-
     def _searchOnHost(self, host, media, quality, results):
-
         torrents = self.getJsonData(self.buildUrl(media, host), cache_timeout = 1800)
-
         if torrents:
             try:
                 if torrents.get('error'):
                     log.error('%s: %s', (torrents.get('error'), host['host']))
                 elif torrents.get('results'):
                     for torrent in torrents.get('results', []):
+                        if re.match('^(http|https|ftp)://.*$', torrent.get('download_url')):
+                            req = requests.get(torrent.get('download_url'), allow_redirects = False)
+                            if req.status_code == 302 and re.match('^magnet:.*$', req.headers["Location"]):
+                                torrent['download_url'] =  req.headers["Location"]
+                           
+
                         results.append({
                             'id': torrent.get('torrent_id'),
                             'protocol': 'torrent' if re.match('^(http|https|ftp)://.*$', torrent.get('download_url')) else 'torrent_magnet',
@@ -56,12 +49,9 @@ class Base(TorrentProvider):
                             'seed_ratio': host['seed_ratio'],
                             'seed_time': host['seed_time'],
                         })
-
             except:
                 log.error('Failed getting results from %s: %s', (host['host'], traceback.format_exc()))
-
     def getHosts(self):
-
         uses = splitString(str(self.conf('use')), clean = False)
         hosts = splitString(self.conf('host'), clean = False)
         names = splitString(self.conf('name'), clean = False)
@@ -69,25 +59,18 @@ class Base(TorrentProvider):
         seed_ratios = splitString(self.conf('seed_ratio'), clean = False)
         pass_keys = splitString(self.conf('pass_key'), clean = False)
         extra_score = splitString(self.conf('extra_score'), clean = False)
-
         host_list = []
         for nr in range(len(hosts)):
-
             try: key = pass_keys[nr]
             except: key = ''
-
             try: host = hosts[nr]
             except: host = ''
-
             try: name = names[nr]
             except: name = ''
-
             try: ratio = seed_ratios[nr]
             except: ratio = ''
-
             try: seed_time = seed_times[nr]
             except: seed_time = ''
-
             host_list.append({
                 'use': uses[nr],
                 'host': host,
@@ -97,33 +80,23 @@ class Base(TorrentProvider):
                 'pass_key': key,
                 'extra_score': tryInt(extra_score[nr]) if len(extra_score) > nr else 0
             })
-
         return host_list
-
     def belongsTo(self, url, provider = None, host = None):
-
         hosts = self.getHosts()
-
         for host in hosts:
             result = super(Base, self).belongsTo(url, host = host['host'], provider = provider)
             if result:
                 return result
-
     def isDisabled(self, host = None):
         return not self.isEnabled(host)
-
     def isEnabled(self, host = None):
-
     # Return true if at least one is enabled and no host is given
         if host is None:
             for host in self.getHosts():
                 if self.isEnabled(host):
                     return True
             return False
-
         return TorrentProvider.isEnabled(self) and host['host'] and host['pass_key'] and int(host['use'])
-
-
 config = [{
     'name': 'torrentpotato',
     'groups': [
